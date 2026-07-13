@@ -327,7 +327,6 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fc5f2);
 scene.fog = new THREE.FogExp2(0x8fc5f2, 0.0068);
 
-// Soft vertical sky gradient (cheap: a canvas texture on a big inverted sphere)
 function makeSkyDome() {
   const canvas = document.createElement('canvas');
   canvas.width = 2; canvas.height = 256;
@@ -350,20 +349,14 @@ makeSkyDome();
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 300);
 
-// On narrow/portrait phone screens, a fixed vertical FOV leaves almost no
-// horizontal field of view, so the runner clips off the left/right edges
-// whenever it moves to an outer lane. We widen the vertical FOV as the
-// aspect ratio narrows so the *horizontal* FOV always stays generous.
 function fitCameraToScreen() {
   const aspect = window.innerWidth / window.innerHeight;
-  const minHorizontalFOVDeg = 78; // guaranteed horizontal field of view
+  const minHorizontalFOVDeg = 78; 
   const targetVFOVRad = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(minHorizontalFOVDeg) / 2) / aspect);
   const targetVFOVDeg = THREE.MathUtils.radToDeg(targetVFOVRad);
   camera.fov = THREE.MathUtils.clamp(targetVFOVDeg, 58, 100);
   camera.aspect = aspect;
 
-  // Pull the camera back a touch on tall/narrow screens so the extra FOV
-  // doesn't make the track feel too zoomed-in / vertiginous.
   const pullBack = aspect < 0.75 ? THREE.MathUtils.mapLinear(aspect, 0.4, 0.75, 3.2, 0) : 0;
   camera.position.set(0, 5.5 + pullBack * 0.4, 7.5 + pullBack);
   camera.lookAt(0, 1.2, -18);
@@ -440,7 +433,6 @@ const leftLeg = new THREE.Mesh(legGeo, legMat);
 leftLeg.position.set(-0.18, 0.3, 0); leftLeg.castShadow = true; player.add(leftLeg);
 const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.18; player.add(rightLeg);
 
-// Arms: thin capsules, pivoted from the shoulder so they swing naturally
 const armGeo = new THREE.CapsuleGeometry(0.08, 0.32, 12, 12);
 const armMat = new THREE.MeshStandardMaterial({ color: 0xffeebb, roughness: 0.4 });
 const leftArmPivot = new THREE.Group(); leftArmPivot.position.set(-0.4, 1.28, 0);
@@ -454,7 +446,6 @@ player.position.set(0, 0, 0); scene.add(player);
 
 const staticScenery = [];
 
-// Procedural window-grid facade textures (no external assets to fetch/fail on).
 function makeBuildingTexture(baseHue) {
   const canvas = document.createElement('canvas');
   canvas.width = 128; canvas.height = 256;
@@ -510,16 +501,43 @@ function createTrain(lane) {
 
   const tColor = new THREE.Color().setHSL(Math.random(), 0.8, 0.4);
   const customBodyMat = new THREE.MeshStandardMaterial({ color: tColor, roughness: 0.2, metalness: 0.7 });
+  const metalTrimMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.3, metalness: 0.8 });
+  const grillMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
 
-  const bodyGeo = new THREE.CylinderGeometry(1.2, 1.2, len, 32);
-  bodyGeo.rotateX(Math.PI / 2);
+  // Main Cab Base
+  const bodyGeo = new THREE.BoxGeometry(2.2, 2.0, len);
   const body = new THREE.Mesh(bodyGeo, customBodyMat);
-  body.position.y = 1.5; body.castShadow = true; body.receiveShadow = true; group.add(body);
+  body.position.y = 1.3;
+  body.castShadow = true; body.receiveShadow = true;
+  group.add(body);
 
-  const glassGeo = new THREE.SphereGeometry(1.22, 32, 16, 0, Math.PI, 0, Math.PI/2);
+  // Realistic Curved Roof Top
+  const roofGeo = new THREE.CylinderGeometry(1.1, 1.1, len, 16, 1, false, 0, Math.PI);
+  roofGeo.rotateX(Math.PI / 2);
+  roofGeo.scale(1, 0.4, 1);
+  const roof = new THREE.Mesh(roofGeo, customBodyMat);
+  roof.position.y = 2.3;
+  roof.castShadow = true;
+  group.add(roof);
+
+  // Front Windshield
+  const glassGeo = new THREE.BoxGeometry(1.9, 0.6, 0.1);
   const glass = new THREE.Mesh(glassGeo, matTrainWin);
-  glass.position.set(0, 1.5, len/2);
+  glass.position.set(0, 1.6, len / 2 + 0.02);
   group.add(glass);
+
+  // Front Engine Grill Accent
+  const grillGeo = new THREE.BoxGeometry(1.4, 0.5, 0.1);
+  const grill = new THREE.Mesh(grillGeo, grillMat);
+  grill.position.set(0, 0.6, len / 2 + 0.02);
+  group.add(grill);
+
+  // Bottom Wheel Base/Chassis Skirting
+  const baseGeo = new THREE.BoxGeometry(2.3, 0.3, len + 0.2);
+  const baseMesh = new THREE.Mesh(baseGeo, metalTrimMat);
+  baseMesh.position.y = 0.25;
+  baseMesh.castShadow = true;
+  group.add(baseMesh);
 
   group.position.set(LANES[lane], 0, SPAWN_Z);
   group.userData = { type: 'train', lane, len, w: 2.4, h: 2.7, animOffset: Math.random() * 100 };
@@ -528,11 +546,26 @@ function createTrain(lane) {
 
 function createBarrier(lane) {
   const group = new THREE.Group();
-  const bar = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 2.0, 16, 16), matBarrier);
-  bar.rotation.z = Math.PI / 2; bar.position.y = 0.8; bar.castShadow = true; group.add(bar);
+  
+  // Left Support Pillar
+  const pillarLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 1.6, 12), matBarrier);
+  pillarLeft.position.set(-1.1, 0.8, 0);
+  pillarLeft.castShadow = true;
+  group.add(pillarLeft);
+
+  // Right Support Pillar
+  const pillarRight = pillarLeft.clone();
+  pillarRight.position.x = 1.1;
+  group.add(pillarRight);
+
+  // Top Horizontal Crossbar
+  const crossbar = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.25, 0.25), matBarrier);
+  crossbar.position.set(0, 1.5, 0);
+  crossbar.castShadow = true;
+  group.add(crossbar);
 
   group.position.set(LANES[lane], 0, SPAWN_Z);
-  group.userData = { type: 'barrier', lane, w: 2.6, h: 1.1 };
+  group.userData = { type: 'barrier', lane, w: 2.6, h: 1.6 };
   scene.add(group); obstacles.push(group);
 }
 
@@ -567,7 +600,12 @@ function checkCollisions() {
     const hw = d.w / 2;
     const hl = d.type === 'train' ? d.len / 2 : 0.2;
     if (px + pHW > ox - hw && px - pHW < ox + hw && pz + pHD > oz - hl && pz - pHD < oz + hl) {
-      if ((py + ph) > 0.1 && py < d.h) return true;
+      if (d.type === 'barrier') {
+        // Player slides cleanly under the crossbar (1.35m clearance) or jumps directly over it
+        if (!isSliding && py < 1.6) return true;
+      } else {
+        if ((py + ph) > 0.1 && py < d.h) return true;
+      }
     }
   }
 
@@ -654,17 +692,9 @@ bindVirtualButton(document.getElementById('btnRight'), 'right');
 bindVirtualButton(document.getElementById('btnJump'), 'jump');
 bindVirtualButton(document.getElementById('btnSlide'), 'slide');
 
-// Swipe gestures (secondary input alongside the on-screen buttons).
-// The old version fired a lane-switch on every 25px of movement while the
-// finger travelled, so one swipe could jump two or three lanes at once.
-// A single swipe should now do exactly ONE thing: it's measured start-to-end
-// (only on touchend), needs a clear, deliberate distance, and is ignored if
-// it doesn't clearly read as more horizontal-than-vertical (or vice versa),
-// so a diagonal swipe can't accidentally trigger both a lane change and a
-// jump/slide at once.
 let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
-const SWIPE_MIN_DIST = 42;   // px - must be a deliberate swipe, not a light tap-drift
-const SWIPE_MAX_TIME = 600;  // ms - ignore slow drags
+const SWIPE_MIN_DIST = 42;   
+const SWIPE_MAX_TIME = 600;  
 
 document.addEventListener('touchstart', e => {
   if (e.target.closest('.mobile-controls') || e.target.closest('.screen-overlay')) return;
@@ -685,10 +715,10 @@ document.addEventListener('touchend', e => {
   if (elapsed > SWIPE_MAX_TIME) return;
 
   const absX = Math.abs(dx), absY = Math.abs(dy);
-  if (Math.max(absX, absY) < SWIPE_MIN_DIST) return; // too small to count as a swipe
+  if (Math.max(absX, absY) < SWIPE_MIN_DIST) return; 
 
   if (absX > absY) {
-    switchLane(dx > 0 ? 1 : -1); // one lane per swipe, never more
+    switchLane(dx > 0 ? 1 : -1); 
   } else {
     if (dy < 0) jump(); else slide();
   }
@@ -761,14 +791,14 @@ function update(dt) {
     }
 
     if (!isJumping && !isSliding) {
-      const runSpeedFactor = 0.6 + (speed / MAX_SPEED) * 0.9; // legs/arms pump faster as speed rises
+      const runSpeedFactor = 0.6 + (speed / MAX_SPEED) * 0.9; 
       const cycle = Date.now() * 0.015 * runSpeedFactor;
       leftLeg.rotation.x = Math.sin(cycle) * 0.8;
       rightLeg.rotation.x = -Math.sin(cycle) * 0.8;
       leftArmPivot.rotation.x = -Math.sin(cycle) * 0.7;
       rightArmPivot.rotation.x = Math.sin(cycle) * 0.7;
       torso.rotation.y = Math.sin(cycle) * 0.12;
-      player.position.y = playerY + Math.abs(Math.sin(cycle)) * 0.05; // subtle run bob
+      player.position.y = playerY + Math.abs(Math.sin(cycle)) * 0.05; 
     } else if (isJumping) {
       leftLeg.rotation.x = 0.5; rightLeg.rotation.x = -0.3;
       leftArmPivot.rotation.x = 0.6; rightArmPivot.rotation.x = -0.6;
@@ -833,7 +863,6 @@ function handleViewportChange() {
   bloomPass.setSize(window.innerWidth, window.innerHeight);
 }
 window.addEventListener('resize', handleViewportChange);
-// iOS/Android address bar show/hide changes innerHeight without firing resize reliably everywhere
 window.addEventListener('orientationchange', () => setTimeout(handleViewportChange, 200));
 animate();
 </script>

@@ -83,8 +83,8 @@ canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
 .toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
 .mobile-controls {
-  position: fixed; left: 0; right: 0; bottom: 18px; z-index: 120;
-  display: none; justify-content: space-between; align-items: flex-end;
+  position: fixed; left:0; right:0; bottom:18px; z-index:120;
+  display:none; justify-content: space-between; align-items: flex-end;
   padding: 0 16px; pointer-events: none;
 }
 .mobile-controls .control-pad {
@@ -140,16 +140,7 @@ canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
     <div class="hud-speed" id="hudSpeed">1.0x</div>
   </div>
 </div>
-<div class="mobile-controls" id="mobileControls">
-  <div class="control-pad">
-    <button id="leftBtn" aria-label="Move left">◀</button>
-    <button id="rightBtn" aria-label="Move right">▶</button>
-  </div>
-  <div class="action-pad">
-    <button id="jumpBtn" aria-label="Jump">⬆</button>
-    <button id="slideBtn" aria-label="Slide">⬇</button>
-  </div>
-</div>
+
 <div class="toast" id="toast"></div>
 
 <script type="importmap">
@@ -173,12 +164,12 @@ let actx;
 let soundReady = false;
 const soundElements = {};
 const soundAssetMap = {
-  jump: ['jump.wav', 'jump.mp3', 'jump.ogg'],
-  slide: ['slide.wav', 'slide.mp3', 'slide.ogg'],
-  coin: ['coin.wav', 'coin.mp3', 'coin.ogg'],
-  crash: ['crash.wav', 'crash.mp3', 'crash.ogg'],
-  beat: ['beat.wav', 'beat.mp3', 'beat.ogg'],
-  pant: ['pant.wav', 'pant.mp3', 'pant.ogg']
+  jump: ['jump.mp3', 'jump.wav', 'jump.ogg'],
+  slide: ['slide.mp3', 'slide.wav', 'slide.ogg'],
+  coin: ['coin.mp3', 'coin.wav', 'coin.ogg'],
+  crash: ['crash.mp3', 'crash.wav', 'crash.ogg'],
+  beat: ['beat.mp3', 'beat.wav', 'beat.ogg'],
+  pant: ['pant.mp3', 'pant.wav', 'pant.ogg']
 };
 
 function loadLocalSound(name, candidates) {
@@ -207,29 +198,6 @@ function loadLocalSound(name, candidates) {
   tryNextCandidate();
 }
 
-function discoverAudioFiles() {
-  const files = [];
-  const scriptTag = document.currentScript;
-  const basePath = scriptTag ? scriptTag.src : window.location.href;
-  const folderUrl = basePath.substring(0, basePath.lastIndexOf('/') + 1);
-
-  return new Promise((resolve) => {
-    const request = new XMLHttpRequest();
-    request.open('GET', folderUrl, true);
-    request.responseType = 'document';
-    request.onload = () => {
-      const links = Array.from(request.response.querySelectorAll('a'));
-      links.forEach((link) => {
-        const href = link.getAttribute('href') || '';
-        if (/\.mp3$/i.test(href)) files.push(href.split('/').pop());
-      });
-      resolve(files);
-    };
-    request.onerror = () => resolve([]);
-    request.send();
-  });
-}
-
 function playLocalSound(name) {
   const audio = soundElements[name];
   if (!audio) return false;
@@ -252,16 +220,8 @@ const SoundFX = {
     if(actx.state === 'suspended') actx.resume();
     if(soundReady) return;
 
-    discoverAudioFiles().then((files) => {
-      const available = new Set(files);
-      Object.entries(soundAssetMap).forEach(([name, candidates]) => {
-        const matched = candidates.find((candidate) => available.has(candidate));
-        if (matched) {
-          loadLocalSound(name, [matched]);
-        } else {
-          loadLocalSound(name, candidates);
-        }
-      });
+    Object.entries(soundAssetMap).forEach(([name, candidates]) => {
+      loadLocalSound(name, candidates);
     });
     soundReady = true;
   },
@@ -621,10 +581,29 @@ function bindVirtualButton(button, action) {
   });
 }
 
-bindVirtualButton(document.getElementById('leftBtn'), 'left');
-bindVirtualButton(document.getElementById('rightBtn'), 'right');
-bindVirtualButton(document.getElementById('jumpBtn'), 'jump');
-bindVirtualButton(document.getElementById('slideBtn'), 'slide');
+
+
+// Touch gestures
+let touchStartX=0,touchStartY=0;
+document.addEventListener('touchstart',e=>{
+ const t=e.touches[0];
+ touchStartX=t.clientX; touchStartY=t.clientY;
+},{passive:true});
+document.addEventListener('touchmove',e=>{
+ const t=e.touches[0];
+ const dx=t.clientX-touchStartX;
+ if(Math.abs(dx)>25){
+   if(dx>0) switchLane(1); else switchLane(-1);
+   touchStartX=t.clientX;
+ }
+ e.preventDefault();
+},{passive:false});
+document.addEventListener('touchend',e=>{
+ const t=e.changedTouches[0];
+ const dy=t.clientY-touchStartY;
+ if(dy<-60) jump();
+ else if(dy>60) slide();
+},{passive:true});
 
 /* ===== Game Loop ===== */
 function startGame() {

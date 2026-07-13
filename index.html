@@ -35,13 +35,13 @@ canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
   justify-content: space-between; align-items: flex-start;
 }
 .hud-card {
-  background: var(--glass); backdrop-filter: blur(12px);
+  background: var(--glass); backdrop-filter: blur(14px) saturate(1.4);
   border: 1px solid var(--border); padding: 12px 20px;
-  border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+  border-radius: 14px; box-shadow: 0 8px 32px rgba(0,0,0,0.18);
 }
 .hud-left, .hud-right { display: flex; flex-direction: column; gap: 4px; }
-.hud-score { font-family: 'Russo One', sans-serif; font-size: clamp(28px, 5vw, 42px); color: #fff; line-height: 1; }
-.hud-coins { font-size: clamp(16px, 3vw, 20px); font-weight: 700; color: var(--accent2); }
+.hud-score { font-family: 'Russo One', sans-serif; font-size: clamp(28px, 5vw, 42px); color: #fff; line-height: 1; text-shadow: 0 2px 10px rgba(0,0,0,0.25); }
+.hud-coins { font-size: clamp(16px, 3vw, 20px); font-weight: 700; color: var(--accent2); text-shadow: 0 1px 6px rgba(0,0,0,0.2); }
 .hud-speed { font-size: 14px; color: #fff; text-align: right; font-weight: 700; }
 
 .screen-overlay {
@@ -63,8 +63,11 @@ canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
   pointer-events: all; font-family: 'Russo One', sans-serif; font-size: 20px;
   padding: 16px 48px; border: none; border-radius: 50px;
   background: linear-gradient(135deg, var(--accent), #ff9900); color: #fff; cursor: pointer;
+  box-shadow: 0 10px 28px rgba(255, 107, 0, 0.45), inset 0 1px 0 rgba(255,255,255,0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  letter-spacing: 1px;
 }
-.btn:active { transform: scale(0.95); }
+.btn:active { transform: scale(0.94); box-shadow: 0 4px 14px rgba(255, 107, 0, 0.4); }
 
 .go-title { font-family: 'Russo One', sans-serif; font-size: 48px; color: var(--danger); margin-bottom: 20px; }
 .go-score { font-family: 'Russo One', sans-serif; font-size: 40px; color: #fff; margin-bottom: 4px; }
@@ -143,6 +146,17 @@ canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
 
 <div class="toast" id="toast"></div>
 
+<div class="mobile-controls" id="mobileControls">
+  <div class="control-pad">
+    <button id="btnLeft" aria-label="Move left">◀</button>
+    <button id="btnRight" aria-label="Move right">▶</button>
+  </div>
+  <div class="action-pad">
+    <button id="btnSlide" aria-label="Slide">▼</button>
+    <button id="btnJump" aria-label="Jump">▲</button>
+  </div>
+</div>
+
 <script type="importmap">
 {
   "imports": {
@@ -155,10 +169,9 @@ canvas { display: block; position: fixed; top: 0; left: 0; z-index: 1; }
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-// ==========================================
-// AUDIO ENGINE (LOCAL FILES WITH SYNTH FALLBACK)
-// ==========================================
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 let actx;
 let soundReady = false;
@@ -232,10 +245,10 @@ const SoundFX = {
     osc.type = type;
     osc.frequency.setValueAtTime(freq, actx.currentTime);
     if (slideFreq) osc.frequency.exponentialRampToValueAtTime(slideFreq, actx.currentTime + duration);
-    
+
     gain.gain.setValueAtTime(vol, actx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + duration);
-    
+
     osc.connect(gain); gain.connect(actx.destination);
     osc.start(); osc.stop(actx.currentTime + duration);
   },
@@ -245,17 +258,17 @@ const SoundFX = {
     const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
     const data = buffer.getChannelData(0);
     for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-    
+
     const noise = actx.createBufferSource();
     noise.buffer = buffer;
-    
+
     const filter = actx.createBiquadFilter();
     filter.type = 'lowpass'; filter.frequency.value = 1000;
-    
+
     const gain = actx.createGain();
     gain.gain.setValueAtTime(vol, actx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + duration);
-    
+
     noise.connect(filter); filter.connect(gain); gain.connect(actx.destination);
     noise.start();
   },
@@ -298,7 +311,6 @@ const SoundFX = {
 let lastBeatTime = 0;
 let lastPantTime = 0;
 
-/* ===== Constants & State ===== */
 const LANE_W = 2.8; const LANES = [-LANE_W, 0, LANE_W];
 const GRAVITY = -38; const JUMP_V = 14; const SLIDE_DUR = 0.6;
 const INIT_SPEED = 20; const MAX_SPEED = 55;
@@ -311,33 +323,75 @@ let isJumping = false, isSliding = false, slideTimer = 0;
 let spawnTimer = 0, spawnInterval = 1.0;
 let highScore = parseInt(localStorage.getItem('railrush_hi') || '0');
 
-/* ===== Three.js Setup ===== */
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x66aaff); 
-scene.fog = new THREE.FogExp2(0x66aaff, 0.008);
+scene.background = new THREE.Color(0x8fc5f2);
+scene.fog = new THREE.FogExp2(0x8fc5f2, 0.0068);
+
+// Soft vertical sky gradient (cheap: a canvas texture on a big inverted sphere)
+function makeSkyDome() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2; canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#2f7fd6');
+  grad.addColorStop(0.45, '#6fb3e8');
+  grad.addColorStop(0.75, '#bfe0f5');
+  grad.addColorStop(1, '#eaf6ff');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const geo = new THREE.SphereGeometry(260, 24, 16);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false });
+  const dome = new THREE.Mesh(geo, mat);
+  scene.add(dome);
+}
+makeSkyDome();
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 300);
-camera.position.set(0, 5.5, 7.5); camera.lookAt(0, 1.2, -18);
+
+// On narrow/portrait phone screens, a fixed vertical FOV leaves almost no
+// horizontal field of view, so the runner clips off the left/right edges
+// whenever it moves to an outer lane. We widen the vertical FOV as the
+// aspect ratio narrows so the *horizontal* FOV always stays generous.
+function fitCameraToScreen() {
+  const aspect = window.innerWidth / window.innerHeight;
+  const minHorizontalFOVDeg = 78; // guaranteed horizontal field of view
+  const targetVFOVRad = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(minHorizontalFOVDeg) / 2) / aspect);
+  const targetVFOVDeg = THREE.MathUtils.radToDeg(targetVFOVRad);
+  camera.fov = THREE.MathUtils.clamp(targetVFOVDeg, 58, 100);
+  camera.aspect = aspect;
+
+  // Pull the camera back a touch on tall/narrow screens so the extra FOV
+  // doesn't make the track feel too zoomed-in / vertiginous.
+  const pullBack = aspect < 0.75 ? THREE.MathUtils.mapLinear(aspect, 0.4, 0.75, 3.2, 0) : 0;
+  camera.position.set(0, 5.5 + pullBack * 0.4, 7.5 + pullBack);
+  camera.lookAt(0, 1.2, -18);
+  camera.updateProjectionMatrix();
+}
+fitCameraToScreen();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
 document.body.prepend(renderer.domElement);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.35, 0.5, 0.82);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
 
-/* ===== Lighting ===== */
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const dirLight = new THREE.DirectionalLight(0xffeedd, 1.2);
 dirLight.position.set(20, 40, -10); dirLight.castShadow = true;
 dirLight.shadow.mapSize.set(1024, 1024);
 scene.add(dirLight);
 
-/* ===== Materials (Smooth & Realistic Shading) ===== */
-// Use roughness and metalness to make objects react beautifully to light
 const matGround = new THREE.MeshStandardMaterial({ color: 0x88bb66, roughness: 1.0 }); 
 const matRail = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.2, metalness: 0.9 });
 const matTie = new THREE.MeshStandardMaterial({ color: 0x4a3020, roughness: 0.9 });
@@ -345,7 +399,6 @@ const matTrainWin = new THREE.MeshStandardMaterial({ color: 0x111111, roughness:
 const matBarrier = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
 const matCoin = new THREE.MeshStandardMaterial({ color: 0xffdd00, roughness: 0.1, metalness: 1.0 });
 
-/* ===== Environment ===== */
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 400), matGround);
 ground.rotation.x = -Math.PI / 2; ground.position.z = -150; ground.receiveShadow = true; scene.add(ground);
 
@@ -369,44 +422,64 @@ for (let lane = 0; lane < 3; lane++) {
   }
 }
 
-/* ===== SMOOTH PLAYER RIG ===== */
 const player = new THREE.Group();
 
-// Head: Sphere
 const headGeo = new THREE.SphereGeometry(0.28, 32, 32);
 const headMat = new THREE.MeshStandardMaterial({ color: 0xffeebb, roughness: 0.4 });
 const head = new THREE.Mesh(headGeo, headMat);
 head.position.y = 1.6; head.castShadow = true; player.add(head);
 
-// Torso: Capsule (Smooth rounded pill shape)
 const torsoGeo = new THREE.CapsuleGeometry(0.35, 0.4, 16, 32);
 const torsoMat = new THREE.MeshStandardMaterial({ color: 0xff3366, roughness: 0.5 });
 const torso = new THREE.Mesh(torsoGeo, torsoMat);
 torso.position.y = 0.95; torso.castShadow = true; player.add(torso);
 
-// Legs: Capsules
 const legGeo = new THREE.CapsuleGeometry(0.12, 0.4, 16, 16);
 const legMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 });
 const leftLeg = new THREE.Mesh(legGeo, legMat);
 leftLeg.position.set(-0.18, 0.3, 0); leftLeg.castShadow = true; player.add(leftLeg);
 const rightLeg = leftLeg.clone(); rightLeg.position.x = 0.18; player.add(rightLeg);
 
+// Arms: thin capsules, pivoted from the shoulder so they swing naturally
+const armGeo = new THREE.CapsuleGeometry(0.08, 0.32, 12, 12);
+const armMat = new THREE.MeshStandardMaterial({ color: 0xffeebb, roughness: 0.4 });
+const leftArmPivot = new THREE.Group(); leftArmPivot.position.set(-0.4, 1.28, 0);
+const leftArm = new THREE.Mesh(armGeo, armMat); leftArm.position.y = -0.22; leftArm.castShadow = true;
+leftArmPivot.add(leftArm); player.add(leftArmPivot);
+const rightArmPivot = leftArmPivot.clone(); rightArmPivot.position.x = 0.4;
+rightArmPivot.children[0].castShadow = true;
+player.add(rightArmPivot);
+
 player.position.set(0, 0, 0); scene.add(player);
 
-/* ===== Photorealistic Buildings ===== */
 const staticScenery = [];
-const textureLoader = new THREE.TextureLoader();
-const buildingTextures = [
-  textureLoader.load('image_9db183.png'),
-  textureLoader.load('image_9db1a9.png'),
-  textureLoader.load('image_9db1e7.png'),
-  textureLoader.load('image_9db227.png')
-];
 
-buildingTextures.forEach((texture) => {
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.colorSpace = THREE.SRGBColorSpace;
-});
+// Procedural window-grid facade textures (no external assets to fetch/fail on).
+function makeBuildingTexture(baseHue) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128; canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const baseColor = `hsl(${baseHue}, 22%, ${28 + Math.random() * 12}%)`;
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const cols = 6, rows = 14;
+  const cw = canvas.width / cols, rh = canvas.height / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const lit = Math.random() > 0.55;
+      ctx.fillStyle = lit ? `hsla(${45 + Math.random() * 15}, 90%, 78%, 0.9)` : 'rgba(10,14,22,0.65)';
+      const pad = 3;
+      ctx.fillRect(c * cw + pad, r * rh + pad, cw - pad * 2, rh - pad * 2);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const buildingTextures = [200, 215, 25, 260].map(makeBuildingTexture);
 
 function createEnvironment() {
   for (let side = -1; side <= 1; side += 2) {
@@ -418,7 +491,7 @@ function createEnvironment() {
       selectedTexture.repeat.set(w / 4, h / 4);
       selectedTexture.needsUpdate = true;
       bMat.map = selectedTexture;
-      
+
       const bMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bMat);
       bMesh.position.set(xBase + (side > 0 ? w/2 : -w/2), h/2, -i * 14);
       bMesh.castShadow = true; bMesh.receiveShadow = true;
@@ -428,25 +501,21 @@ function createEnvironment() {
 }
 createEnvironment();
 
-/* ===== Spawning Entities Pool ===== */
 const obstacles = [];
 const coinObjects = [];
 
-// SMOOTH BULLET TRAINS
 function createTrain(lane) {
   const group = new THREE.Group();
   const len = 12 + Math.random() * 4;
-  
+
   const tColor = new THREE.Color().setHSL(Math.random(), 0.8, 0.4);
   const customBodyMat = new THREE.MeshStandardMaterial({ color: tColor, roughness: 0.2, metalness: 0.7 });
 
-  // Aerodynamic Cylinder body
   const bodyGeo = new THREE.CylinderGeometry(1.2, 1.2, len, 32);
   bodyGeo.rotateX(Math.PI / 2);
   const body = new THREE.Mesh(bodyGeo, customBodyMat);
   body.position.y = 1.5; body.castShadow = true; body.receiveShadow = true; group.add(body);
-  
-  // Smooth curved windshield
+
   const glassGeo = new THREE.SphereGeometry(1.22, 32, 16, 0, Math.PI, 0, Math.PI/2);
   const glass = new THREE.Mesh(glassGeo, matTrainWin);
   glass.position.set(0, 1.5, len/2);
@@ -459,17 +528,16 @@ function createTrain(lane) {
 
 function createBarrier(lane) {
   const group = new THREE.Group();
-  // Rounded Barrier
   const bar = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 2.0, 16, 16), matBarrier);
   bar.rotation.z = Math.PI / 2; bar.position.y = 0.8; bar.castShadow = true; group.add(bar);
-  
+
   group.position.set(LANES[lane], 0, SPAWN_Z);
   group.userData = { type: 'barrier', lane, w: 2.6, h: 1.1 };
   scene.add(group); obstacles.push(group);
 }
 
 function createCoin(lane, z) {
-  const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.08, 16, 32), matCoin); // High poly coin
+  const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.08, 16, 32), matCoin);
   mesh.position.set(LANES[lane], 1.1, z); mesh.rotation.y = Math.PI / 2;
   mesh.userData = { lane, collected: false }; scene.add(mesh); coinObjects.push(mesh);
 }
@@ -489,7 +557,6 @@ function spawnWave() {
   }
 }
 
-/* ===== Collision & Input ===== */
 function checkCollisions() {
   const px = player.position.x, py = playerY, pz = player.position.z;
   const ph = isSliding ? 0.65 : 1.9;
@@ -508,7 +575,7 @@ function checkCollisions() {
     const c = coinObjects[i];
     const dx = px - c.position.x, dy = (py + 1.0) - c.position.y, dz = pz - c.position.z;
     if (dx * dx + dy * dy + dz * dz < 1.3) {
-      SoundFX.coin(); // PLAY COIN SOUND
+      SoundFX.coin();
       scene.remove(c); coinObjects.splice(i, 1);
       coins++; score += 50;
       gsap.fromTo("#hudCoins", { scale: 1.5, color: "#fff" }, { scale: 1, color: "var(--accent2)", duration: 0.3 });
@@ -521,13 +588,14 @@ function switchLane(dir) { if (state === 'playing') targetLane = Math.max(0, Mat
 function jump() { 
   if (state === 'playing' && !isJumping && !isSliding) { 
     isJumping = true; velY = JUMP_V; 
-    SoundFX.jump(); // PLAY JUMP SOUND
+    SoundFX.jump();
+    gsap.fromTo(player.scale, { y: 1.12, x: 0.92, z: 0.92 }, { y: 1, x: 1, z: 1, duration: 0.18, ease: "power2.out" });
   } 
 }
 function slide() {
   if (state === 'playing' && !isSliding && !isJumping) {
     isSliding = true; slideTimer = SLIDE_DUR;
-    SoundFX.slide(); // PLAY SLIDE SOUND
+    SoundFX.slide();
     gsap.to(torso.scale, { y: 0.5, duration: 0.1 });
     gsap.to(torso.position, { y: 0.5, duration: 0.1 });
     gsap.to(head.position, { y: 0.9, duration: 0.1 });
@@ -581,61 +649,83 @@ function bindVirtualButton(button, action) {
   });
 }
 
+bindVirtualButton(document.getElementById('btnLeft'), 'left');
+bindVirtualButton(document.getElementById('btnRight'), 'right');
+bindVirtualButton(document.getElementById('btnJump'), 'jump');
+bindVirtualButton(document.getElementById('btnSlide'), 'slide');
 
+// Swipe gestures (secondary input alongside the on-screen buttons).
+// The old version fired a lane-switch on every 25px of movement while the
+// finger travelled, so one swipe could jump two or three lanes at once.
+// A single swipe should now do exactly ONE thing: it's measured start-to-end
+// (only on touchend), needs a clear, deliberate distance, and is ignored if
+// it doesn't clearly read as more horizontal-than-vertical (or vice versa),
+// so a diagonal swipe can't accidentally trigger both a lane change and a
+// jump/slide at once.
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+const SWIPE_MIN_DIST = 42;   // px - must be a deliberate swipe, not a light tap-drift
+const SWIPE_MAX_TIME = 600;  // ms - ignore slow drags
 
-// Touch gestures
-let touchStartX=0,touchStartY=0;
-document.addEventListener('touchstart',e=>{
- const t=e.touches[0];
- touchStartX=t.clientX; touchStartY=t.clientY;
-},{passive:true});
-document.addEventListener('touchmove',e=>{
- const t=e.touches[0];
- const dx=t.clientX-touchStartX;
- if(Math.abs(dx)>25){
-   if(dx>0) switchLane(1); else switchLane(-1);
-   touchStartX=t.clientX;
- }
- e.preventDefault();
-},{passive:false});
-document.addEventListener('touchend',e=>{
- const t=e.changedTouches[0];
- const dy=t.clientY-touchStartY;
- if(dy<-60) jump();
- else if(dy>60) slide();
-},{passive:true});
+document.addEventListener('touchstart', e => {
+  if (e.target.closest('.mobile-controls') || e.target.closest('.screen-overlay')) return;
+  const t = e.touches[0];
+  touchStartX = t.clientX; touchStartY = t.clientY; touchStartTime = Date.now();
+}, { passive: true });
 
-/* ===== Game Loop ===== */
+document.addEventListener('touchmove', e => {
+  if (e.target.closest('.mobile-controls')) return;
+  e.preventDefault();
+}, { passive: false });
+
+document.addEventListener('touchend', e => {
+  if (e.target.closest('.mobile-controls') || e.target.closest('.screen-overlay')) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStartX, dy = t.clientY - touchStartY;
+  const elapsed = Date.now() - touchStartTime;
+  if (elapsed > SWIPE_MAX_TIME) return;
+
+  const absX = Math.abs(dx), absY = Math.abs(dy);
+  if (Math.max(absX, absY) < SWIPE_MIN_DIST) return; // too small to count as a swipe
+
+  if (absX > absY) {
+    switchLane(dx > 0 ? 1 : -1); // one lane per swipe, never more
+  } else {
+    if (dy < 0) jump(); else slide();
+  }
+}, { passive: true });
+
 function startGame() {
-  SoundFX.init(); // Initialize audio engine on user interaction
+  SoundFX.init();
   gsap.to(".screen-overlay", { opacity: 0, duration: 0.3, onComplete: () => {
     document.querySelectorAll('.screen-overlay').forEach(el => el.style.display = 'none');
   }});
   document.getElementById('hud').style.display = 'flex';
-  
+
   score = 0; coins = 0; speed = INIT_SPEED; targetLane = 1; currentX = 0;
   playerY = 0; velY = 0; isJumping = false; isSliding = false;
   obstacles.forEach(o => scene.remove(o)); obstacles.length = 0;
   coinObjects.forEach(c => scene.remove(c)); coinObjects.length = 0;
-  
+
   state = 'playing';
 }
 
 function triggerGameOver() {
   state = 'gameover';
-  SoundFX.crash(); // PLAY CRASH SOUND
-  
+  SoundFX.crash();
+
   if (score > highScore) { highScore = score; localStorage.setItem('railrush_hi', highScore); }
   document.getElementById('goScore').textContent = Math.floor(score);
   document.getElementById('goCoins').textContent = coins + " coins";
   document.getElementById('goHigh').textContent = "Best: " + Math.floor(highScore);
-  
+
   const goScreen = document.getElementById('gameOverScreen');
   goScreen.style.display = 'flex'; gsap.to(goScreen, { opacity: 1, duration: 0.4 });
 }
 
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('retryBtn').addEventListener('click', startGame);
+
+gsap.from('#startScreen .panel', { y: 30, opacity: 0, duration: 0.7, ease: 'power3.out' });
 
 const clock = new THREE.Clock();
 
@@ -653,7 +743,10 @@ function update(dt) {
 
     if (isJumping) {
       playerY += velY * dt; velY += GRAVITY * dt;
-      if (playerY <= 0) { playerY = 0; isJumping = false; }
+      if (playerY <= 0) {
+        playerY = 0; isJumping = false;
+        gsap.fromTo(player.scale, { y: 0.8, x: 1.15, z: 1.15 }, { y: 1, x: 1, z: 1, duration: 0.22, ease: "back.out(3)" });
+      }
     }
     player.position.y = playerY;
 
@@ -667,24 +760,32 @@ function update(dt) {
       }
     }
 
-    // Dynamic Human Running Animation
     if (!isJumping && !isSliding) {
-      const cycle = Date.now() * 0.015;
+      const runSpeedFactor = 0.6 + (speed / MAX_SPEED) * 0.9; // legs/arms pump faster as speed rises
+      const cycle = Date.now() * 0.015 * runSpeedFactor;
       leftLeg.rotation.x = Math.sin(cycle) * 0.8;
       rightLeg.rotation.x = -Math.sin(cycle) * 0.8;
-      torso.rotation.y = Math.sin(cycle) * 0.15;
+      leftArmPivot.rotation.x = -Math.sin(cycle) * 0.7;
+      rightArmPivot.rotation.x = Math.sin(cycle) * 0.7;
+      torso.rotation.y = Math.sin(cycle) * 0.12;
+      player.position.y = playerY + Math.abs(Math.sin(cycle)) * 0.05; // subtle run bob
+    } else if (isJumping) {
+      leftLeg.rotation.x = 0.5; rightLeg.rotation.x = -0.3;
+      leftArmPivot.rotation.x = 0.6; rightArmPivot.rotation.x = -0.6;
+      torso.rotation.y = 0;
+      player.position.y = playerY;
     } else {
       leftLeg.rotation.x = rightLeg.rotation.x = torso.rotation.y = 0;
+      leftArmPivot.rotation.x = rightArmPivot.rotation.x = 0;
+      player.position.y = playerY;
     }
 
-    // AUDIO: Play rhythmic beat and panting based on time/speed
     const now = actx ? actx.currentTime : 0;
-    const beatInterval = 0.4 - (speed / MAX_SPEED) * 0.2; // Gets faster as you speed up
+    const beatInterval = 0.4 - (speed / MAX_SPEED) * 0.2;
     if (now - lastBeatTime > beatInterval) {
         SoundFX.musicBeat();
         lastBeatTime = now;
     }
-    // Panting sound occurs slightly off-beat and only at higher speeds
     if (speed > 30 && now - lastPantTime > beatInterval * 2.1) {
         SoundFX.pant();
         lastPantTime = now;
@@ -725,10 +826,15 @@ function animate() {
   composer.render();
 }
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
+function handleViewportChange() {
+  fitCameraToScreen();
   renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  composer.setSize(window.innerWidth, window.innerHeight);
+  bloomPass.setSize(window.innerWidth, window.innerHeight);
+}
+window.addEventListener('resize', handleViewportChange);
+// iOS/Android address bar show/hide changes innerHeight without firing resize reliably everywhere
+window.addEventListener('orientationchange', () => setTimeout(handleViewportChange, 200));
 animate();
 </script>
 </body>

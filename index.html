@@ -284,7 +284,7 @@ let coinCombo = 0, lastCoinTime = 0;
 const LANE_W = 2.8; const LANES = [-LANE_W, 0, LANE_W];
 const GRAVITY = -38; const JUMP_V = 14; const SLIDE_DUR = 0.6;
 const INIT_SPEED = 20; const MAX_SPEED = 58;
-const SPAWN_Z = -140; const DESPAWN_Z = 20;
+const SPAWN_Z = -140; const DESPAWN_Z = 40; // Increased to prevent objects popping out visibly
 
 let state = 'menu';
 let score = 0, coins = 0, speed = INIT_SPEED;
@@ -294,10 +294,9 @@ let spawnTimer = 0, spawnInterval = 1.0;
 let highScore = parseInt(localStorage.getItem('railrush_hi') || '0');
 
 // Power-up States
-let activePowerup = null; // 'magnet' or 'jet'
+let activePowerup = null; 
 let powerupTimer = 0;
-const MAGNET_DUR = 8.0;
-const JET_DUR = 6.0;
+const MAGNET_DUR = 8.0, JET_DUR = 6.0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fc5f2);
@@ -332,8 +331,10 @@ fitCameraToScreen();
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Performance Optimization: Cap mobile pixel ratio to 1.5 to stop lagging
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.shadowMap.enabled = true; 
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
 document.body.prepend(renderer.domElement);
 
@@ -345,7 +346,37 @@ composer.addPass(bloomPass); composer.addPass(new OutputPass());
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const dirLight = new THREE.DirectionalLight(0xffeedd, 1.2);
 dirLight.position.set(20, 40, -10); dirLight.castShadow = true;
-dirLight.shadow.mapSize.set(1024, 1024); scene.add(dirLight);
+// Performance Optimization: Reduced shadow map resolution
+dirLight.shadow.mapSize.set(512, 512); 
+scene.add(dirLight);
+
+// --- PRE-COMPILED GEOMETRIES FOR PERFORMANCE (Stops Lagging) ---
+const geoTrainBody = new THREE.BoxGeometry(2.2, 2.0, 1);
+const geoTrainRoof = new THREE.CylinderGeometry(1.1, 1.1, 1, 12, 1, false, 0, Math.PI);
+geoTrainRoof.rotateX(Math.PI / 2); geoTrainRoof.scale(1, 0.4, 1);
+const geoTrainGlass = new THREE.BoxGeometry(1.9, 0.6, 0.1);
+const geoTrainBase = new THREE.BoxGeometry(2.3, 0.3, 1);
+const geoBarrierPillar = new THREE.CylinderGeometry(0.12, 0.15, 1.6, 8);
+const geoBarrierCross = new THREE.BoxGeometry(2.5, 0.25, 0.25);
+
+// Taller & Wider Tunnel Arch to fix camera clipping (Radius 7.5)
+const geoTunnelArch = new THREE.CylinderGeometry(7.5, 7.5, 30, 16, 1, true, 0, Math.PI);
+geoTunnelArch.rotateZ(Math.PI / 2); geoTunnelArch.rotateY(Math.PI / 2);
+const geoTunnelWall = new THREE.BoxGeometry(0.8, 3, 30);
+
+const geoGantryPillar = new THREE.BoxGeometry(0.4, 6.5, 0.4);
+const geoGantryBeam = new THREE.BoxGeometry(12.4, 0.6, 0.6);
+const geoSigBox = new THREE.BoxGeometry(0.6, 0.8, 0.4);
+const geoSigLight = new THREE.SphereGeometry(0.15, 8, 8);
+const geoCoinBase = new THREE.CylinderGeometry(0.3, 0.3, 0.08, 16);
+geoCoinBase.rotateX(Math.PI / 2);
+const geoEth = new THREE.OctahedronGeometry(0.16, 0);
+const geoCoinRing = new THREE.TorusGeometry(0.22, 0.015, 6, 24);
+const geoMagCurve = new THREE.TorusGeometry(0.4, 0.15, 8, 12, Math.PI);
+const geoMagProng = new THREE.CylinderGeometry(0.15, 0.15, 0.4, 8);
+const geoMagTip = new THREE.CylinderGeometry(0.15, 0.15, 0.2, 8);
+const geoJetBody = new THREE.CylinderGeometry(0.25, 0.35, 0.9, 10);
+const geoJetNose = new THREE.ConeGeometry(0.25, 0.4, 10);
 
 // --- MATERIALS ---
 const matGround = new THREE.MeshStandardMaterial({ color: 0x5a8f3e, roughness: 0.9 }); 
@@ -356,15 +387,14 @@ const matTrainWin = new THREE.MeshStandardMaterial({ color: 0x111111, roughness:
 const matBarrier = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.4 });
 const matLightPole = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5, metalness: 0.7 });
 const matBulb = new THREE.MeshBasicMaterial({ color: 0xfff4cc });
-const matTunnel = new THREE.MeshStandardMaterial({ color: 0x777a80, roughness: 0.7 });
+// FIX: DoubleSide ensures you see the inside of the tunnel, preventing visual gray glitches
+const matTunnel = new THREE.MeshStandardMaterial({ color: 0x777a80, roughness: 0.7, side: THREE.DoubleSide });
 const matTreeTrunk = new THREE.MeshStandardMaterial({ color: 0x4a2e18, roughness: 0.9 });
 const matTreeLeaves = [
   new THREE.MeshStandardMaterial({ color: 0x2e6f40, roughness: 0.6 }),
   new THREE.MeshStandardMaterial({ color: 0x38864e, roughness: 0.6 }),
   new THREE.MeshStandardMaterial({ color: 0x449c5c, roughness: 0.6 })
 ];
-
-// Ethereum Coin Materials
 const matEthGold = new THREE.MeshStandardMaterial({ color: 0xffe044, roughness: 0.2, metalness: 1.0, emissive: 0x332200 });
 const matEthWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1, metalness: 0.3, emissive: 0x444444 });
 
@@ -444,7 +474,9 @@ function createMultiSphereTree(x, z) {
   const tree = new THREE.Group();
   const trunkH = 2 + Math.random() * 2;
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, trunkH, 8), matTreeTrunk);
-  trunk.position.y = trunkH / 2; trunk.castShadow = true; tree.add(trunk);
+  trunk.position.y = trunkH / 2; 
+  // Disable tree shadows for massive performance boost
+  trunk.castShadow = false; tree.add(trunk);
 
   const foliage = new THREE.Group();
   const sphereCount = 4 + Math.floor(Math.random() * 4);
@@ -453,7 +485,7 @@ function createMultiSphereTree(x, z) {
     const mat = matTreeLeaves[Math.floor(Math.random() * matTreeLeaves.length)];
     const sphere = new THREE.Mesh(new THREE.SphereGeometry(radius, 8, 8), mat);
     sphere.position.set((Math.random()-0.5)*1.5, trunkH + (Math.random()*1.8) - 0.5, (Math.random()-0.5)*1.5);
-    sphere.castShadow = true; foliage.add(sphere);
+    sphere.castShadow = false; foliage.add(sphere);
   }
   tree.add(foliage); tree.position.set(x, 0, z); scene.add(tree); staticScenery.push(tree);
 }
@@ -461,7 +493,7 @@ function createMultiSphereTree(x, z) {
 function createStreetLight(x, z, side) {
   const lightGroup = new THREE.Group();
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 5, 8), matLightPole);
-  pole.position.y = 2.5; pole.castShadow = true; lightGroup.add(pole);
+  pole.position.y = 2.5; pole.castShadow = false; lightGroup.add(pole);
   
   const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2, 8), matLightPole);
   arm.position.set(side * -0.8, 4.9, 0); arm.rotation.z = side * Math.PI / 3; lightGroup.add(arm);
@@ -485,7 +517,7 @@ function createEnvironment() {
       selectedTexture.repeat.set(w / 4, h / 4); selectedTexture.needsUpdate = true; bMat.map = selectedTexture;
       const bMesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bMat);
       bMesh.position.set(side * (14 + w/2), h/2, z);
-      bMesh.castShadow = true; bMesh.receiveShadow = true; scene.add(bMesh); staticScenery.push(bMesh);
+      bMesh.castShadow = false; bMesh.receiveShadow = false; scene.add(bMesh); staticScenery.push(bMesh);
       if (Math.random() > 0.3) createMultiSphereTree(side * (6.5 + Math.random() * 3), z + Math.random()*6);
       if (Math.random() > 0.5) createMultiSphereTree(side * (9 + Math.random() * 2), z - Math.random()*6);
       if (i % 2 === 0) createStreetLight(side * 5.8, z, side);
@@ -504,13 +536,23 @@ function createTrain(lane) {
   const tColor = new THREE.Color().setHSL(Math.random(), 0.8, 0.4);
   const customBodyMat = new THREE.MeshStandardMaterial({ color: tColor, roughness: 0.2, metalness: 0.7 });
   const metalTrimMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.3, metalness: 0.8 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, len), customBodyMat);
+  
+  // Use pre-compiled geometries & simply scale them on Z-axis
+  const body = new THREE.Mesh(geoTrainBody, customBodyMat);
+  body.scale.set(1, 1, len);
   body.position.y = 1.3; body.castShadow = true; body.receiveShadow = true; group.add(body);
-  const roofGeo = new THREE.CylinderGeometry(1.1, 1.1, len, 16, 1, false, 0, Math.PI);
-  roofGeo.rotateX(Math.PI / 2); roofGeo.scale(1, 0.4, 1);
-  const roof = new THREE.Mesh(roofGeo, customBodyMat); roof.position.y = 2.3; roof.castShadow = true; group.add(roof);
-  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 0.1), matTrainWin); glass.position.set(0, 1.6, len / 2 + 0.02); group.add(glass);
-  const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.3, len + 0.2), metalTrimMat); baseMesh.position.y = 0.25; baseMesh.castShadow = true; group.add(baseMesh);
+  
+  const roof = new THREE.Mesh(geoTrainRoof, customBodyMat); 
+  roof.scale.set(1, 1, len);
+  roof.position.y = 2.3; roof.castShadow = true; group.add(roof);
+  
+  const glass = new THREE.Mesh(geoTrainGlass, matTrainWin); 
+  glass.position.set(0, 1.6, len / 2 + 0.02); group.add(glass);
+  
+  const baseMesh = new THREE.Mesh(geoTrainBase, metalTrimMat); 
+  baseMesh.scale.set(1, 1, len + 0.2);
+  baseMesh.position.y = 0.25; baseMesh.castShadow = true; group.add(baseMesh);
+  
   group.position.set(LANES[lane], 0, SPAWN_Z);
   group.userData = { type: 'train', lane, len, w: 2.4, h: 2.7, animOffset: Math.random() * 100 };
   scene.add(group); obstacles.push(group);
@@ -518,23 +560,24 @@ function createTrain(lane) {
 
 function createBarrier(lane) {
   const group = new THREE.Group();
-  const pillarLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 1.6, 12), matBarrier); pillarLeft.position.set(-1.1, 0.8, 0); pillarLeft.castShadow = true; group.add(pillarLeft);
+  const pillarLeft = new THREE.Mesh(geoBarrierPillar, matBarrier); pillarLeft.position.set(-1.1, 0.8, 0); pillarLeft.castShadow = true; group.add(pillarLeft);
   const pillarRight = pillarLeft.clone(); pillarRight.position.x = 1.1; group.add(pillarRight);
-  const crossbar = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.25, 0.25), matBarrier); crossbar.position.set(0, 1.5, 0); crossbar.castShadow = true; group.add(crossbar);
+  const crossbar = new THREE.Mesh(geoBarrierCross, matBarrier); crossbar.position.set(0, 1.5, 0); crossbar.castShadow = true; group.add(crossbar);
   group.position.set(LANES[lane], 0, SPAWN_Z);
   group.userData = { type: 'barrier', lane, w: 2.6, h: 1.6 };
   scene.add(group); obstacles.push(group);
 }
 
 function createTunnel(z) {
-  const group = new THREE.Group(); const len = 30;
-  const archGeo = new THREE.CylinderGeometry(5.8, 5.8, len, 16, 1, true, 0, Math.PI);
-  archGeo.rotateZ(Math.PI / 2); archGeo.rotateY(Math.PI / 2);
-  const archMesh = new THREE.Mesh(archGeo, matTunnel);
+  const group = new THREE.Group(); 
+  const archMesh = new THREE.Mesh(geoTunnelArch, matTunnel);
   archMesh.position.y = 0.5; archMesh.castShadow = true; archMesh.receiveShadow = true; group.add(archMesh);
-  const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.8, 3, len), matTunnel);
-  wallL.position.set(-5.4, 1.5, 0); wallL.castShadow = true; group.add(wallL);
-  const wallR = wallL.clone(); wallR.position.x = 5.4; group.add(wallR);
+  
+  // Placed walls cleanly based on new 7.5 arch radius
+  const wallL = new THREE.Mesh(geoTunnelWall, matTunnel);
+  wallL.position.set(-7.1, 1.5, 0); wallL.castShadow = true; group.add(wallL);
+  const wallR = wallL.clone(); wallR.position.x = 7.1; group.add(wallR);
+  
   group.position.set(0, 0, z); group.userData = { type: 'scenery_struct' };
   scene.add(group); obstacles.push(group);
 }
@@ -542,45 +585,30 @@ function createTunnel(z) {
 function createJunction(z) {
   const group = new THREE.Group();
   const gantryMat = new THREE.MeshStandardMaterial({color: 0x444444, metalness: 0.8});
-  const pL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 6, 0.4), gantryMat); pL.position.set(-5.2, 3, 0); pL.castShadow = true; group.add(pL);
-  const pR = pL.clone(); pR.position.x = 5.2; group.add(pR);
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(10.8, 0.6, 0.6), gantryMat); beam.position.set(0, 5.8, 0); beam.castShadow = true; group.add(beam);
+  const pL = new THREE.Mesh(geoGantryPillar, gantryMat); pL.position.set(-6.0, 3.25, 0); pL.castShadow = true; group.add(pL);
+  const pR = pL.clone(); pR.position.x = 6.0; group.add(pR);
+  const beam = new THREE.Mesh(geoGantryBeam, gantryMat); beam.position.set(0, 6.2, 0); beam.castShadow = true; group.add(beam);
   LANES.forEach(lx => {
-    const sigBox = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.4), gantryMat); sigBox.position.set(lx, 5.1, 0.1); group.add(sigBox);
+    const sigBox = new THREE.Mesh(geoSigBox, gantryMat); sigBox.position.set(lx, 5.5, 0.1); group.add(sigBox);
     const isGreen = Math.random() > 0.3;
-    const light = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), new THREE.MeshBasicMaterial({color: isGreen ? 0x00ff44 : 0xff0022}));
-    light.position.set(lx, 5.1, 0.35); group.add(light);
+    const light = new THREE.Mesh(geoSigLight, new THREE.MeshBasicMaterial({color: isGreen ? 0x00ff44 : 0xff0022}));
+    light.position.set(lx, 5.5, 0.35); group.add(light);
   });
   group.position.set(0, 0, z); group.userData = { type: 'scenery_struct' }; scene.add(group); obstacles.push(group);
 }
 
 function createCoin(lane, z, height=1.1) {
   const group = new THREE.Group();
+  const base = new THREE.Mesh(geoCoinBase, matEthGold); group.add(base);
   
-  // Base Golden Cylinder
-  const baseGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.08, 24);
-  baseGeo.rotateX(Math.PI / 2); // Rotate to face forward
-  const base = new THREE.Mesh(baseGeo, matEthGold);
-  group.add(base);
+  const ethFront = new THREE.Mesh(geoEth, matEthWhite); ethFront.scale.set(1, 1.5, 0.3); ethFront.position.z = 0.045; group.add(ethFront);
+  const ethBack = new THREE.Mesh(geoEth, matEthWhite); ethBack.scale.set(1, 1.5, 0.3); ethBack.position.z = -0.045; group.add(ethBack);
 
-  // White Ethereum Logo (simulated with stretched octahedrons)
-  const ethGeo = new THREE.OctahedronGeometry(0.16, 0);
-  const eth = new THREE.Mesh(ethGeo, matEthWhite);
-  eth.scale.set(1, 1.5, 0.3); // Stretch to diamond shape
-  
-  // Add logo to both sides
-  const ethFront = eth.clone(); ethFront.position.z = 0.045; group.add(ethFront);
-  const ethBack = eth.clone(); ethBack.position.z = -0.045; group.add(ethBack);
+  const ringFront = new THREE.Mesh(geoCoinRing, matEthWhite); ringFront.position.z = 0.04; group.add(ringFront);
+  const ringBack = new THREE.Mesh(geoCoinRing, matEthWhite); ringBack.position.z = -0.04; group.add(ringBack);
 
-  // Inner decoration ring
-  const ringGeo = new THREE.TorusGeometry(0.22, 0.015, 8, 32);
-  const ringFront = new THREE.Mesh(ringGeo, matEthWhite); ringFront.position.z = 0.04; group.add(ringFront);
-  const ringBack = new THREE.Mesh(ringGeo, matEthWhite); ringBack.position.z = -0.04; group.add(ringBack);
-
-  group.position.set(LANES[lane], height, z); 
-  group.userData = { lane }; 
-  scene.add(group); 
-  coinObjects.push(group);
+  group.position.set(LANES[lane], height, z); group.userData = { lane }; 
+  scene.add(group); coinObjects.push(group);
 }
 
 function createPowerup(lane, z, type) {
@@ -588,36 +616,29 @@ function createPowerup(lane, z, type) {
   if (type === 'magnet') {
     const magMat = new THREE.MeshStandardMaterial({color: 0xee1111, roughness: 0.3, metalness: 0.6});
     const tipMat = new THREE.MeshStandardMaterial({color: 0xdddddd, roughness: 0.2, metalness: 0.9});
-    const curve = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.15, 12, 16, Math.PI), magMat);
-    curve.rotation.x = Math.PI; group.add(curve);
-    const prL = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.4), magMat); prL.position.set(-0.4, 0.2, 0); group.add(prL);
+    const curve = new THREE.Mesh(geoMagCurve, magMat); curve.rotation.x = Math.PI; group.add(curve);
+    const prL = new THREE.Mesh(geoMagProng, magMat); prL.position.set(-0.4, 0.2, 0); group.add(prL);
     const prR = prL.clone(); prR.position.x = 0.4; group.add(prR);
-    const tipL = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.2), tipMat); tipL.position.set(-0.4, 0.5, 0); group.add(tipL);
+    const tipL = new THREE.Mesh(geoMagTip, tipMat); tipL.position.set(-0.4, 0.5, 0); group.add(tipL);
     const tipR = tipL.clone(); tipR.position.x = 0.4; group.add(tipR);
   } else if (type === 'jet') {
     const rocMat = new THREE.MeshStandardMaterial({color: 0xff4400, roughness: 0.3, metalness: 0.5});
     const finMat = new THREE.MeshStandardMaterial({color: 0xffcc00, roughness: 0.4});
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 0.9, 12), rocMat); group.add(body);
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.4, 12), finMat); nose.position.y = 0.65; group.add(nose);
+    const body = new THREE.Mesh(geoJetBody, rocMat); group.add(body);
+    const nose = new THREE.Mesh(geoJetNose, finMat); nose.position.y = 0.65; group.add(nose);
   }
-  group.position.set(LANES[lane], 1.3, z);
-  group.userData = { type };
+  group.position.set(LANES[lane], 1.3, z); group.userData = { type };
   scene.add(group); powerupObjects.push(group);
 }
 
 function spawnWave() {
   if (Math.random() < 0.15) {
-    if (Math.random() < 0.5) createTunnel(SPAWN_Z - 15);
-    else createJunction(SPAWN_Z);
+    if (Math.random() < 0.5) createTunnel(SPAWN_Z - 15); else createJunction(SPAWN_Z);
   }
-
-  const r = Math.random();
-  const lane = Math.floor(Math.random() * 3);
-  const spawnHeight = activePowerup === 'jet' ? 6.0 : 1.1;
+  const r = Math.random(), lane = Math.floor(Math.random() * 3), spawnHeight = activePowerup === 'jet' ? 6.0 : 1.1;
 
   if (!activePowerup && Math.random() < 0.12) {
-    const pLane = (lane + 1) % 3;
-    createPowerup(pLane, SPAWN_Z - 5, Math.random() < 0.5 ? 'magnet' : 'jet');
+    createPowerup((lane + 1) % 3, SPAWN_Z - 5, Math.random() < 0.5 ? 'magnet' : 'jet');
   }
 
   if (r < 0.4) {
@@ -631,7 +652,6 @@ function spawnWave() {
 }
 
 function spawnFloatingText(text, coinMesh) {
-  // Calculate 2D screen position from 3D world position
   const vector = coinMesh.position.clone();
   vector.project(camera);
   const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
@@ -645,19 +665,14 @@ function spawnFloatingText(text, coinMesh) {
   document.body.appendChild(floatEl);
 
   gsap.to(floatEl, {
-    y: y - 100,
-    opacity: 0,
-    scale: 1.4,
-    duration: 0.7,
-    ease: "power2.out",
+    y: y - 80, opacity: 0, scale: 1.3, duration: 0.6, ease: "power2.out",
     onComplete: () => floatEl.remove()
   });
 }
 
 function checkCollisions() {
   const px = player.position.x, py = player.position.y, pz = player.position.z;
-  const ph = isSliding ? 0.65 : 1.9;
-  const pHW = 0.32, pHD = 0.2;
+  const ph = isSliding ? 0.65 : 1.9, pHW = 0.32, pHD = 0.2;
 
   if (activePowerup !== 'jet') {
     for (const obs of obstacles) {
@@ -676,25 +691,15 @@ function checkCollisions() {
   }
 
   const now = Date.now();
-  // Reset combo if no coin collected in the last 1.2 seconds
-  if (now - lastCoinTime > 1200) {
-    coinCombo = 0;
-  }
+  if (now - lastCoinTime > 1200) coinCombo = 0;
 
   for (let i = coinObjects.length - 1; i >= 0; i--) {
     const c = coinObjects[i];
-    if (activePowerup === 'magnet' && c.position.z > -30 && c.position.z < 5) {
-      c.position.lerp(new THREE.Vector3(px, py + 1.0, pz), 0.15);
-    }
+    if (activePowerup === 'magnet' && c.position.z > -30 && c.position.z < 5) c.position.lerp(new THREE.Vector3(px, py + 1.0, pz), 0.15);
     const dx = px - c.position.x, dy = (py + 1.0) - c.position.y, dz = pz - c.position.z;
     if (dx * dx + dy * dy + dz * dz < 1.6) {
-      SoundFX.coin();
-      
-      // Increment Combo and show floating text
-      coinCombo++;
-      lastCoinTime = now;
+      SoundFX.coin(); coinCombo++; lastCoinTime = now;
       spawnFloatingText(coinCombo + '+', c);
-
       scene.remove(c); coinObjects.splice(i, 1);
       coins++; score += 50;
       gsap.fromTo("#hudCoins", { scale: 1.5, color: "#fff" }, { scale: 1, color: "var(--accent2)", duration: 0.3 });
@@ -702,27 +707,22 @@ function checkCollisions() {
   }
 
   for (let i = powerupObjects.length - 1; i >= 0; i--) {
-    const p = powerupObjects[i];
-    const dx = px - p.position.x, dz = pz - p.position.z;
+    const p = powerupObjects[i]; const dx = px - p.position.x, dz = pz - p.position.z;
     if (dx * dx + dz * dz < 2.0) {
       SoundFX.powerup(); activatePowerup(p.userData.type);
       scene.remove(p); powerupObjects.splice(i, 1);
     }
   }
-
   return false;
 }
 
 function activatePowerup(type) {
   activePowerup = type;
-  const meter = document.getElementById('powerupMeter');
-  const title = document.getElementById('powerupTitle');
-  meter.style.display = 'flex';
-  
+  document.getElementById('powerupMeter').style.display = 'flex';
   if (type === 'magnet') {
-    powerupTimer = MAGNET_DUR; title.innerHTML = '🧲 MAGNET';
+    powerupTimer = MAGNET_DUR; document.getElementById('powerupTitle').innerHTML = '🧲 MAGNET';
   } else if (type === 'jet') {
-    powerupTimer = JET_DUR; title.innerHTML = '🚀 JETPACK';
+    powerupTimer = JET_DUR; document.getElementById('powerupTitle').innerHTML = '🚀 JETPACK';
     jetpackMesh.visible = true; isJumping = false; isSliding = false;
     gsap.to(player.position, { y: 6.0, duration: 0.6, ease: 'power2.out' });
   }
